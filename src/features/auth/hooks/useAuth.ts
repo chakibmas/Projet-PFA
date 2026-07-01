@@ -16,7 +16,7 @@ export function useAuth() {
     onSuccess: ({ user, accessToken, refreshToken }) => {
       store.setAuth(user, accessToken, refreshToken);
       notify('Connexion réussie !', 'success');
-      // Redirect to role-specific dashboard
+      // Redirect to role-specific dashboard (primary role)
       const dashboards: Record<string, string> = {
         PLATFORM_ADMIN: '/admin/dashboard',
         CLUB_ADMIN: '/club-admin/dashboard',
@@ -42,7 +42,11 @@ export function useAuth() {
   return {
     user: me ?? store.user,
     isAuthenticated: store.isAuthenticated,
+    activeRole: store.activeRole,
     hasRole: store.hasRole,
+    hasAnyRole: store.hasAnyRole,
+    switchRole: store.switchRole,
+    getEffectiveRoles: store.getEffectiveRoles,
     login: loginMutation.mutate,
     isLoginPending: loginMutation.isPending,
     logout,

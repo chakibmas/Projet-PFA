@@ -3,10 +3,16 @@ import {
   Avatar,
   Badge,
   Box,
+  Button,
   Chip,
+  Divider,
   IconButton,
+  List,
+  ListItemButton,
+  ListItemText,
   Menu,
   MenuItem,
+  Popover,
   Stack,
   Toolbar,
   Tooltip,
@@ -16,11 +22,15 @@ import MenuIcon from '@mui/icons-material/Menu';
 import SchoolIcon from '@mui/icons-material/School';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import NotificationsIcon from '@mui/icons-material/Notifications';
+import CircleIcon from '@mui/icons-material/Circle';
 import LoginIcon from '@mui/icons-material/Login';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { UserRole } from '@/shared/types/auth.types';
+import { apiGet } from '@/shared/api/apiClient';
+import type { Notification } from '@/shared/types/notification.types';
 
 const ROLE_META: Record<UserRole, { label: string; color: string }> = {
   PLATFORM_ADMIN: { label: 'Admin Plateforme', color: '#1565C0' },
@@ -34,12 +44,22 @@ interface Props {
 }
 
 export function AppTopBar({ onMenuClick }: Props) {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, activeRole } = useAuth();
   const navigate = useNavigate();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [notifAnchorEl, setNotifAnchorEl] = useState<null | HTMLElement>(null);
+
+  const { data: notifications } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: () => apiGet<Notification[]>('/api/notifications'),
+    enabled: isAuthenticated,
+  });
+
+  const unreadCount = notifications?.filter((n) => n.statut === 'NON_LUE').length ?? 0;
 
   const initials = user ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase() : '';
-  const roleMeta = ROLE_META[user?.role ?? 'VISITOR'];
+  const currentRole = activeRole ?? user?.role ?? 'VISITOR';
+  const roleMeta = ROLE_META[currentRole];
 
   return (
     <AppBar
@@ -85,12 +105,80 @@ export function AppTopBar({ onMenuClick }: Props) {
 
             {/* Notifications */}
             <Tooltip title="Notifications">
-              <IconButton color="inherit" aria-label="Notifications" sx={{ mr: 1 }}>
-                <Badge badgeContent={2} color="error">
+              <IconButton
+                color="inherit"
+                aria-label="Notifications"
+                sx={{ mr: 1 }}
+                onClick={(e) => setNotifAnchorEl(e.currentTarget)}
+              >
+                <Badge badgeContent={unreadCount} color="error">
                   <NotificationsIcon />
                 </Badge>
               </IconButton>
             </Tooltip>
+
+            <Popover
+              open={Boolean(notifAnchorEl)}
+              anchorEl={notifAnchorEl}
+              onClose={() => setNotifAnchorEl(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              slotProps={{ paper: { sx: { width: 360, maxHeight: 420 } } }}
+            >
+              <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="subtitle1" fontWeight={700}>Notifications</Typography>
+                {unreadCount > 0 && (
+                  <Typography variant="caption" color="primary">{unreadCount} non lue(s)</Typography>
+                )}
+              </Box>
+              <Divider />
+
+              {(!notifications || notifications.length === 0) ? (
+                <Box sx={{ p: 3, textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Aucune notification</Typography>
+                </Box>
+              ) : (
+                <List disablePadding sx={{ maxHeight: 300, overflowY: 'auto' }}>
+                  {notifications.slice(0, 5).map((notif, index) => {
+                    const isUnread = notif.statut === 'NON_LUE';
+                    return (
+                      <Box key={notif.id}>
+                        <ListItemButton
+                          onClick={() => {
+                            setNotifAnchorEl(null);
+                            if (notif.link) navigate(notif.link);
+                          }}
+                          sx={{ bgcolor: isUnread ? 'action.hover' : 'transparent' }}
+                        >
+                          {isUnread && <CircleIcon sx={{ fontSize: 8, color: 'primary.main', mr: 1.5 }} />}
+                          <ListItemText
+                            primary={
+                              <Typography variant="body2" fontWeight={isUnread ? 700 : 400} noWrap>
+                                {notif.message}
+                              </Typography>
+                            }
+                            secondary={new Date(notif.dateEnvoi).toLocaleDateString('fr-FR', {
+                              day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                            })}
+                          />
+                        </ListItemButton>
+                        {index < Math.min(notifications.length, 5) - 1 && <Divider />}
+                      </Box>
+                    );
+                  })}
+                </List>
+              )}
+
+              <Divider />
+              <Box sx={{ p: 1, textAlign: 'center' }}>
+                <Button
+                  size="small"
+                  onClick={() => { setNotifAnchorEl(null); navigate('/notifications'); }}
+                >
+                  Voir toutes les notifications
+                </Button>
+              </Box>
+            </Popover>
 
             {/* User avatar menu */}
             <Tooltip title={`${user.firstName} ${user.lastName}`}>

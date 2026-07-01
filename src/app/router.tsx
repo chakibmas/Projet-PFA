@@ -49,6 +49,10 @@ import { NotificationsPage } from '@/features/notifications/pages/NotificationsP
 // ── Chatbot admin ───────────────────────────────────────────────────────────
 import { ChatbotAdminPage } from '@/features/chatbot/pages/ChatbotAdminPage';
 
+// ── Club Requests ───────────────────────────────────────────────────────────
+import { CreateClubRequestPage } from '@/features/club-requests/pages/CreateClubRequestPage';
+import { ManageClubRequestsPage } from '@/features/club-requests/pages/ManageClubRequestsPage';
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  Route helper: wraps in ProtectedRoute + RoleGate
 // ═══════════════════════════════════════════════════════════════════════════
@@ -137,6 +141,28 @@ export const router = createBrowserRouter([
           <Protected>
             <RoleGate roles={['PLATFORM_ADMIN']}>
               <ChatbotAdminPage />
+            </RoleGate>
+          </Protected>
+        ),
+      },
+      {
+        path: 'admin/club-requests',
+        element: (
+          <Protected>
+            <RoleGate roles={['PLATFORM_ADMIN']}>
+              <ManageClubRequestsPage />
+            </RoleGate>
+          </Protected>
+        ),
+      },
+
+      // ══ CLUB REQUESTS (Membre) ═══════════════════════════════════════════
+      {
+        path: 'club-requests/new',
+        element: (
+          <Protected>
+            <RoleGate roles={['MEMBER']}>
+              <CreateClubRequestPage />
             </RoleGate>
           </Protected>
         ),

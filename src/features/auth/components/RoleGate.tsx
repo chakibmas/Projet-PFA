@@ -10,9 +10,10 @@ interface Props {
 }
 
 export function RoleGate({ roles, children, fallback }: Props) {
-  const hasRole = useAuthStore((s) => s.hasRole);
+  const hasAnyRole = useAuthStore((s) => s.hasAnyRole);
 
-  if (!hasRole(roles)) {
+  // Allow access if the user has any of the required roles (across all their roles)
+  if (!hasAnyRole(roles)) {
     return (
       <>
         {fallback ?? (

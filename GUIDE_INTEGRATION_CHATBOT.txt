@@ -1,0 +1,399 @@
+====================================================================
+   GUIDE D'INTÉGRATION FRONT ↔ BACK — CHATBOT UNICLUBS
+====================================================================
+
+Ce guide explique comment connecter le frontend React (PROJET PFA)
+au backend microservices Spring Boot du collègue pour le chatbot.
+
+Les deux projets sont sur des machines différentes.
+Le backend est en ARCHITECTURE MICROSERVICES.
+
+
+====================================================================
+PARTIE 0 — ARCHITECTURE MICROSERVICES (BACK)
+====================================================================
+
+Le backend utilise une architecture microservices. Le front ne doit
+communiquer qu'avec UN SEUL point d'entrée (la Gateway).
+
+Architecture typique :
+
+  [FRONT React]
+       │
+       │  HTTP (toutes les requêtes)
+       ▼
+  ┌─────────────────────┐
+  │  API GATEWAY        │  ← Port unique (ex: 8080)
+  │  (Spring Cloud GW)  │     SEUL point contacté par le front
+  └──────┬──────────────┘
+         │ routing interne
+    ┌────┼────┬────────────┬────────────┐
+    ▼    ▼    ▼            ▼            ▼
+  Auth  Club  Chatbot    Event     Membership
+  Svc   Svc   Service    Svc        Svc
+  :8081 :8082 :8083      :8084     :8085
+
+  (les ports internes ne concernent PAS le front)
+
+IMPORTANT POUR LE COLLÈGUE :
+  Le front appelle TOUJOURS des URLs comme :
+    POST http://<IP_GATEWAY>:<PORT>/api/chatbot/ask
+    GET  http://<IP_GATEWAY>:<PORT>/api/chatbot/faqs
+
+  La Gateway doit router :
+    /api/chatbot/** → chatbot-service
+    /api/auth/**    → auth-service
+    /api/clubs/**   → club-service
+    etc.
+
+  Le front ne sait PAS qu'il y a des microservices derrière.
+  Il voit une seule URL de base (VITE_API_BASE_URL).
+
+QUESTION À POSER AU COLLÈGUE :
+  → "Quel est le port de ta Gateway ? (ex: 8080)"
+  → "Quelle est ton IP locale ? (ipconfig)"
+  → C'est tout ce dont le front a besoin.
+
+
+====================================================================
+PARTIE 1 — ARCHITECTURE ACTUELLE DU FRONT
+====================================================================
+
+Fichiers concernés :
+  src/shared/api/apiClient.ts       → Client HTTP (fetch + JWT)
+  src/features/chatbot/api/chatbotApi.ts → Appels chatbot
+  src/shared/types/chatbot.types.ts  → Types TypeScript
+  src/features/chatbot/components/ChatbotWidget.tsx → Widget UI
+  src/features/chatbot/pages/ChatbotAdminPage.tsx   → Admin FAQs/Logs
+  src/mocks/handlers.ts              → Mocks MSW (mode démo)
+  src/main.tsx                        → Bootstrap (mock ou réel)
+  .env                                → Configuration
+
+Fonctionnement actuel :
+  - Le front utilise MSW (Mock Service Worker) pour simuler le back
+  - VITE_USE_MOCKS=true dans .env → mocks activés, pas de backend
+  - Les requêtes passent par apiClient.ts qui ajoute le JWT
+    et pointe vers VITE_API_BASE_URL
+
+
+====================================================================
+PARTIE 2 — CE QUE LE COLLÈGUE (BACK) DOIT IMPLÉMENTER
+====================================================================
+
+4 endpoints Spring Boot avec ces contrats EXACTS :
+
+--------------------------------------------------------------------
+ENDPOINT 1 : POST /api/chatbot/ask
+--------------------------------------------------------------------
+Headers reçus : Authorization: Bearer <jwt_token>
+                Content-Type: application/json
+
+Request body :
+  {
+    "message": "Comment rejoindre un club ?",
+    "context": "historique optionnel"
+  }
+
+Response body (200 OK) :
+  {
+    "answer": "Pour rejoindre un club...",
+    "suggestedActions": [
+      { "label": "Voir les clubs", "value": "liste des clubs" },
+      { "label": "Comment postuler ?", "value": "comment postuler" }
+    ],
+    "escalate": false
+  }
+
+Champs obligatoires : answer (String)
+Champs optionnels   : suggestedActions (array), escalate (boolean)
+
+Le front gère :
+  - suggestedActions : affiche des boutons cliquables
+  - escalate: true → affiche un bandeau "Contactez support@uniclubs.fr"
+  - Erreur / timeout → affiche "⚠️ Erreur: ..."
+
+--------------------------------------------------------------------
+ENDPOINT 2 : GET /api/chatbot/faqs
+--------------------------------------------------------------------
+Headers : Authorization: Bearer <jwt_token>
+
+Response (200 OK) :
+  [
+    {
+      "id": "f1",
+      "question": "Comment rejoindre un club ?",
+      "answer": "Allez dans la page Clubs...",
+      "category": "Adhésions",
+      "createdAt": "2025-04-01T10:00:00Z"
+    }
+  ]
+
+Tous les champs sont obligatoires sauf category (nullable).
+
+--------------------------------------------------------------------
+ENDPOINT 3 : POST /api/chatbot/faqs
+--------------------------------------------------------------------
+Headers : Authorization: Bearer <jwt_token>
+          Content-Type: application/json
+
+Request body :
+  {
+    "question": "...",
+    "answer": "...",
+    "category": "..."
+  }
+
+Response (201 Created) : l'objet FAQ créé avec id + createdAt
+
+--------------------------------------------------------------------
+ENDPOINT 4 : GET /api/chatbot/logs
+--------------------------------------------------------------------
+Headers : Authorization: Bearer <jwt_token>
+
+Response (200 OK) :
+  [
+    {
+      "id": "log1",
+      "userId": "u1",
+      "sessionId": "sess-abc",
+      "userMessage": "Comment rejoindre ?",
+      "botAnswer": "Pour rejoindre...",
+      "escalated": false,
+      "feedback": "POSITIVE",
+      "createdAt": "2025-04-07T10:00:00Z"
+    }
+  ]
+
+feedback est nullable : "POSITIVE", "NEGATIVE" ou absent.
+
+
+====================================================================
+PARTIE 3 — CORS (TRÈS IMPORTANT)
+====================================================================
+
+Le collègue DOIT activer CORS dans son Spring Boot pour autoriser
+le front à appeler le back depuis une autre machine.
+
+Option A — application.properties :
+  (n'existe pas nativement, il faut le faire en Java)
+
+Option B — Classe de config (RECOMMANDÉ) :
+
+  @Configuration
+  public class CorsConfig implements WebMvcConfigurer {
+      @Override
+      public void addCorsMappings(CorsRegistry registry) {
+          registry.addMapping("/api/**")
+              .allowedOrigins(
+                  "http://localhost:5173",         // Vite dev
+                  "http://<IP_DU_FRONT>:5173"      // Machine du front
+              )
+              .allowedMethods("GET","POST","PUT","DELETE","OPTIONS")
+              .allowedHeaders("*")
+              .allowCredentials(true);
+      }
+  }
+
+Option C — Si Spring Security est utilisé :
+
+  @Bean
+  public CorsConfigurationSource corsConfigurationSource() {
+      CorsConfiguration config = new CorsConfiguration();
+      config.setAllowedOrigins(List.of(
+          "http://localhost:5173",
+          "http://<IP_DU_FRONT>:5173"
+      ));
+      config.setAllowedMethods(List.of("GET","POST","PUT","DELETE","OPTIONS"));
+      config.setAllowedHeaders(List.of("*"));
+      config.setAllowCredentials(true);
+
+      UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+      source.registerCorsConfiguration("/api/**", config);
+      return source;
+  }
+
+  // Dans SecurityFilterChain :
+  http.cors(c -> c.configurationSource(corsConfigurationSource()))
+
+
+====================================================================
+PARTIE 4 — ÉTAPES POUR CONNECTER (TOI — FRONT)
+====================================================================
+
+ÉTAPE 1 : Récupérer l'IP du collègue
+  → Le collègue lance : ipconfig (Windows) ou ifconfig (Mac/Linux)
+  → Exemple : 192.168.1.42
+
+ÉTAPE 2 : Modifier .env
+  Remplacer :
+    VITE_API_BASE_URL=http://localhost:8081
+    VITE_USE_MOCKS=true
+
+  Par :
+    VITE_API_BASE_URL=http://192.168.1.42:8080
+    VITE_USE_MOCKS=false
+
+  (Remplacer 192.168.1.42 par la vraie IP du collègue)
+  (Le port est celui de la GATEWAY, pas d'un service individuel)
+  (Demander au collègue : "Quel port pour ta Gateway ?")
+
+ÉTAPE 3 : Redémarrer le front
+  → Stopper le serveur Vite (Ctrl+C)
+  → npm run dev
+
+ÉTAPE 4 : Tester
+  → Ouvrir le chatbot (bouton flottant en bas à droite)
+  → Taper "Comment rejoindre un club ?"
+  → Vérifier la réponse du back dans la console (F12 > Network)
+
+C'est tout. AUCUN code à modifier. Seulement le fichier .env.
+
+
+====================================================================
+PARTIE 5 — ÉTAPES POUR CONNECTER (COLLÈGUE — BACK MICROSERVICES)
+====================================================================
+
+ÉTAPE 1 : Implémenter les 4 endpoints dans le chatbot-service
+  (voir Partie 2)
+
+ÉTAPE 2 : Configurer le routing dans la Gateway
+  Dans la config de Spring Cloud Gateway (application.yml) :
+
+    spring:
+      cloud:
+        gateway:
+          routes:
+            - id: chatbot-service
+              uri: http://localhost:8083    # port du chatbot-service
+              predicates:
+                - Path=/api/chatbot/**
+            - id: auth-service
+              uri: http://localhost:8081
+              predicates:
+                - Path=/api/auth/**
+
+ÉTAPE 3 : Ajouter CORS dans la GATEWAY (pas dans chaque service)
+  (voir Partie 3 — la config CORS va dans la Gateway)
+
+ÉTAPE 4 : Exposer la Gateway sur le réseau local
+  Dans application.properties de la GATEWAY :
+    server.address=0.0.0.0
+    server.port=8080
+
+  (0.0.0.0 = écouter sur toutes les interfaces, pas seulement localhost)
+
+ÉTAPE 5 : Vérifier le pare-feu Windows
+  → Autoriser les connexions entrantes sur le port de la Gateway
+  → Ou désactiver temporairement le pare-feu pour tester
+
+ÉTAPE 6 : Communiquer au front :
+  → Son IP locale (ipconfig → IPv4)
+  → Le port de la Gateway
+
+
+====================================================================
+PARTIE 6 — COMMENT LE FRONT GÈRE L'AUTH (JWT)
+====================================================================
+
+Le front envoie automatiquement le header :
+  Authorization: Bearer <token>
+
+Le token est stocké dans localStorage (clé "access_token").
+
+En mode mock, le token est : "mock-token-platform-admin"
+En mode réel, le collègue doit :
+  1. Implémenter POST /api/auth/login
+     → Request : { "email": "...", "password": "..." }
+     → Response : { "accessToken": "jwt-xxx", "user": { ... } }
+  2. Le front stocke automatiquement le accessToken
+
+Si le back retourne 401 → le front redirige vers /login
+
+
+====================================================================
+PARTIE 7 — BASCULER ENTRE MOCK ET RÉEL
+====================================================================
+
+Mode DÉMO (sans backend) :
+  .env → VITE_USE_MOCKS=true
+  → Tout est simulé par MSW, aucun serveur nécessaire
+
+Mode RÉEL (avec backend du collègue) :
+  .env → VITE_USE_MOCKS=false
+         VITE_API_BASE_URL=http://<IP_COLLEGUE>:8080
+  → Les requêtes partent directement vers le vrai serveur
+
+On peut basculer à tout moment en changeant .env + restart Vite.
+
+
+====================================================================
+PARTIE 8 — TESTER SUR LE MÊME RÉSEAU WIFI
+====================================================================
+
+Prérequis :
+  ✓ Les deux machines sur le même réseau WiFi/LAN
+  ✓ Le back écoute sur 0.0.0.0:8080
+  ✓ Le pare-feu autorise le port 8080
+  ✓ CORS configuré avec l'IP du front
+
+Test rapide depuis la machine du front :
+  Dans un terminal PowerShell :
+    curl http://192.168.1.42:8080/api/chatbot/faqs
+
+  (8080 = port de la GATEWAY, pas du chatbot-service directement)
+
+  Si ça retourne du JSON → la connexion fonctionne.
+  Si timeout → vérifier réseau/pare-feu/CORS.
+
+
+====================================================================
+PARTIE 9 — CHECKLIST RÉCAPITULATIVE
+====================================================================
+
+COLLÈGUE (BACK — MICROSERVICES) :
+  [ ] chatbot-service : POST /api/chatbot/ask → ChatAskResponse
+  [ ] chatbot-service : GET  /api/chatbot/faqs → FAQ[]
+  [ ] chatbot-service : POST /api/chatbot/faqs → crée FAQ (201)
+  [ ] chatbot-service : GET  /api/chatbot/logs → ChatLog[]
+  [ ] auth-service    : POST /api/auth/login → { accessToken, user }
+  [ ] Gateway : route /api/chatbot/** → chatbot-service
+  [ ] Gateway : route /api/auth/**    → auth-service
+  [ ] Gateway : CORS configuré pour http://<IP_FRONT>:5173
+  [ ] Gateway : server.address=0.0.0.0
+  [ ] Pare-feu ouvert sur le port de la Gateway
+
+TOI (FRONT) :
+  [ ] .env → VITE_USE_MOCKS=false
+  [ ] .env → VITE_API_BASE_URL=http://<IP_GATEWAY>:<PORT_GATEWAY>
+  [ ] Redémarrer Vite (npm run dev)
+  [ ] Tester le widget chatbot
+  [ ] Vérifier F12 > Network > pas d'erreur CORS
+
+
+====================================================================
+PARTIE 10 — DÉPANNAGE
+====================================================================
+
+Erreur "Failed to fetch" ou "Network Error" :
+  → Le back n'est pas démarré ou l'IP est fausse
+  → Tester : curl http://<IP>:8080/api/chatbot/faqs
+
+Erreur CORS "blocked by CORS policy" :
+  → Le collègue n'a pas configuré CORS
+  → Vérifier que l'origin http://localhost:5173 est autorisé
+
+Erreur 401 Unauthorized :
+  → Le JWT n'est pas valide ou absent
+  → Se connecter d'abord via /login
+  → Vérifier que le back valide le token correctement
+
+Erreur 404 Not Found :
+  → L'endpoint n'existe pas encore côté back
+  → Vérifier les URL : /api/chatbot/ask, /api/chatbot/faqs, etc.
+
+Timeout (10 secondes) :
+  → Le back met trop de temps (appel LLM lent)
+  → Augmenter le timeout dans apiClient.ts si nécessaire
+  → Ligne : setTimeout(() => controller.abort(), 10_000)
+
+====================================================================

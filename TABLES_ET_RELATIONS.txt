@@ -1,0 +1,312 @@
+====================================================================
+   BASE DE DONNÉES UNICLUBS — TABLES, ATTRIBUTS & RELATIONS
+====================================================================
+
+
+====================================================================
+ÉNUMÉRATIONS (types utilisés dans les tables)
+====================================================================
+
+UserRole         : PLATFORM_ADMIN | CLUB_ADMIN | MEMBER | VISITOR
+StatutClub       : EN_ATTENTE | VALIDE | SUSPENDU | ARCHIVE
+StatutAdhesion   : EN_ATTENTE | APPROUVEE | REFUSEE
+StatutInscription: EN_ATTENTE | CONFIRMEE | ANNULEE
+StatutNotification: LUE | NON_LUE
+TypeDocument     : STATUT | REGLEMENT | PV | AFFICHE | JUSTIFICATIF | AUTRE
+ClubRequestStatus: EN_ATTENTE | APPROUVEE | REFUSEE
+
+
+====================================================================
+TABLE 1 : users
+====================================================================
+Colonne           | Type          | Contraintes
+------------------|---------------|----------------------------
+id                | UUID (String) | PK, auto-généré
+firstName         | String        | NOT NULL
+lastName          | String        | NOT NULL
+email             | String        | NOT NULL, UNIQUE
+password          | String        | NOT NULL
+role              | UserRole      | NOT NULL (enum)
+roles             | String(500)   | Multi-rôles séparés par ","
+avatarUrl         | String        | Nullable
+clubId            | String        | FK logique → clubs.id
+managedClubIds    | String(1000)  | IDs séparés par ","
+createdAt         | Instant       | NOT NULL, auto
+
+Relations :
+  • users.clubId → clubs.id (club principal géré, pour CLUB_ADMIN)
+  • Un User peut gérer plusieurs clubs (managedClubIds)
+
+
+====================================================================
+TABLE 2 : clubs
+====================================================================
+Colonne           | Type          | Contraintes
+------------------|---------------|----------------------------
+id                | UUID (String) | PK, auto-généré
+name              | String        | NOT NULL
+description       | TEXT          | Nullable
+category          | String        | Nullable
+logoUrl           | String        | Nullable
+statut            | StatutClub    | NOT NULL (enum)
+memberCount       | int           | Compteur de membres
+adminId           | String        | NOT NULL, FK logique → users.id
+adminName         | String        | Nullable (dénormalisé)
+createdAt         | Instant       | NOT NULL, auto
+
+Relations :
+  • clubs.adminId → users.id (créateur/admin du club)
+
+
+====================================================================
+TABLE 3 : memberships (adhésions)
+====================================================================
+Colonne           | Type            | Contraintes
+------------------|-----------------|----------------------------
+id                | UUID (String)   | PK, auto-généré
+clubId            | String          | NOT NULL, FK logique → clubs.id
+clubName          | String          | Dénormalisé
+userId            | String          | NOT NULL, FK logique → users.id
+userFullName      | String          | Dénormalisé
+userEmail         | String          | Dénormalisé
+status            | StatutAdhesion  | NOT NULL (enum)
+motivation        | String          | Nullable
+cotisationPayee   | boolean         | false par défaut
+commentaire       | String          | Nullable
+appliedAt         | Instant         | NOT NULL, auto
+updatedAt         | Instant         | Auto (PreUpdate)
+
+Relations :
+  • memberships.clubId → clubs.id
+  • memberships.userId → users.id
+  → Table d'association : un User adhère à un Club
+
+
+====================================================================
+TABLE 4 : events (événements)
+====================================================================
+Colonne              | Type          | Contraintes
+---------------------|---------------|----------------------------
+id                   | UUID (String) | PK, auto-généré
+clubId               | String        | NOT NULL, FK logique → clubs.id
+clubName             | String        | Dénormalisé
+title                | String        | NOT NULL
+description          | TEXT          | Nullable
+location             | String        | Nullable
+startDate            | Instant       | NOT NULL
+endDate              | Instant       | NOT NULL
+maxParticipants      | Integer       | Nullable
+registeredCount      | int           | Compteur
+isPublic             | boolean       | —
+requiresRegistration | boolean       | —
+checkInCode          | String        | Code pour le check-in
+createdAt            | Instant       | NOT NULL, auto
+
+Relations :
+  • events.clubId → clubs.id (le club organisateur)
+
+
+====================================================================
+TABLE 5 : event_registrations (inscriptions aux événements)
+====================================================================
+Colonne           | Type              | Contraintes
+------------------|-------------------|----------------------------
+id                | UUID (String)     | PK, auto-généré
+eventId           | String            | NOT NULL, FK logique → events.id
+eventTitle        | String            | Dénormalisé
+userId            | String            | NOT NULL, FK logique → users.id
+userFullName      | String            | Dénormalisé
+dateInscription   | Instant           | NOT NULL, auto
+statut            | StatutInscription | NOT NULL (enum)
+checkinQR         | boolean           | —
+
+Relations :
+  • event_registrations.eventId → events.id
+  • event_registrations.userId → users.id
+  → Table d'association : un User s'inscrit à un Event
+
+
+====================================================================
+TABLE 6 : announcements (annonces)
+====================================================================
+Colonne           | Type          | Contraintes
+------------------|---------------|----------------------------
+id                | UUID (String) | PK, auto-généré
+clubId            | String        | Nullable, FK logique → clubs.id
+clubName          | String        | Dénormalisé
+title             | String        | NOT NULL
+content           | TEXT          | NOT NULL
+targetRole        | String        | Nullable (rôle cible)
+cible             | String        | Nullable
+authorId          | String        | NOT NULL, FK logique → users.id
+authorName        | String        | Dénormalisé
+createdAt         | Instant       | NOT NULL, auto
+
+Relations :
+  • announcements.clubId → clubs.id (annonce liée à un club)
+  • announcements.authorId → users.id (auteur)
+
+
+====================================================================
+TABLE 7 : documents
+====================================================================
+Colonne           | Type          | Contraintes
+------------------|---------------|----------------------------
+id                | UUID (String) | PK, auto-généré
+clubId            | String        | Nullable, FK logique → clubs.id
+clubName          | String        | Dénormalisé
+name              | String        | NOT NULL
+description       | String        | Nullable
+type              | TypeDocument  | Enum, nullable
+fileUrl           | String        | NOT NULL
+mimeType          | String        | Nullable
+sizeBytes         | long          | —
+version           | int           | Défaut : 1
+uploadedBy        | String        | Nullable
+visibleToRoles    | String        | Rôles séparés par ","
+uploadedAt        | Instant       | NOT NULL, auto
+
+Relations :
+  • documents.clubId → clubs.id
+
+
+====================================================================
+TABLE 8 : notifications
+====================================================================
+Colonne           | Type               | Contraintes
+------------------|--------------------|----------------------------
+id                | UUID (String)      | PK, auto-généré
+userId            | String             | NOT NULL, FK logique → users.id
+message           | String             | NOT NULL
+canal             | String             | "IN_APP" ou "EMAIL"
+statut            | StatutNotification | NOT NULL (enum)
+link              | String             | Nullable (lien vers la page)
+dateEnvoi         | Instant            | NOT NULL, auto
+
+Relations :
+  • notifications.userId → users.id (destinataire)
+
+
+====================================================================
+TABLE 9 : club_requests (demandes de création de club)
+====================================================================
+Colonne           | Type              | Contraintes
+------------------|-------------------|----------------------------
+id                | UUID (String)     | PK, auto-généré
+userId            | String            | NOT NULL, FK logique → users.id
+userFullName      | String            | Dénormalisé
+userEmail         | String            | Dénormalisé
+clubName          | String            | NOT NULL
+clubDescription   | TEXT              | NOT NULL
+clubCategory      | String            | NOT NULL
+logoUrl           | String            | Nullable
+motivation        | TEXT              | NOT NULL
+status            | ClubRequestStatus | NOT NULL (enum)
+adminComment      | String            | Nullable
+createdAt         | Instant           | NOT NULL, auto
+updatedAt         | Instant           | Auto (PreUpdate)
+
+Relations :
+  • club_requests.userId → users.id (demandeur)
+
+
+====================================================================
+TABLE 10 : faqs
+====================================================================
+Colonne           | Type          | Contraintes
+------------------|---------------|----------------------------
+id                | UUID (String) | PK, auto-généré
+question          | TEXT          | NOT NULL
+answer            | TEXT          | NOT NULL
+category          | String        | Nullable
+createdAt         | Instant       | NOT NULL, auto
+
+Relations : Aucune FK (table indépendante)
+
+
+====================================================================
+TABLE 11 : chat_logs
+====================================================================
+Colonne           | Type          | Contraintes
+------------------|---------------|----------------------------
+id                | UUID (String) | PK, auto-généré
+userId            | String        | Nullable, FK logique → users.id
+sessionId         | String        | NOT NULL
+userMessage       | TEXT          | NOT NULL
+botAnswer         | TEXT          | NOT NULL
+escalated         | boolean       | —
+feedback          | String        | "POSITIVE" ou "NEGATIVE"
+createdAt         | Instant       | NOT NULL, auto
+
+Relations :
+  • chat_logs.userId → users.id (utilisateur qui a posé la question)
+
+
+====================================================================
+TABLE 12 : user_sessions
+====================================================================
+Colonne           | Type          | Contraintes
+------------------|---------------|----------------------------
+id                | UUID (String) | PK, auto-généré
+userId            | String        | NOT NULL, FK logique → users.id
+ipAddress         | String        | Nullable
+userAgent         | String        | Nullable
+lastActive        | Instant       | Auto
+createdAt         | Instant       | NOT NULL, auto
+
+Relations :
+  • user_sessions.userId → users.id
+
+
+====================================================================
+SCHÉMA DES RELATIONS (vue d'ensemble)
+====================================================================
+
+                         ┌──────────────┐
+                         │    users     │
+                         └──────┬───────┘
+                                │
+        ┌───────────┬───────────┼───────────┬──────────────┬──────────┐
+        │           │           │           │              │          │
+        ▼           ▼           ▼           ▼              ▼          ▼
+   ┌────────┐  ┌────────┐  ┌────────────┐  ┌──────────┐  ┌────────┐ ┌─────────────┐
+   │ clubs  │  │members │  │club_request│  │notificat.│  │chat_log│ │user_sessions│
+   └───┬────┘  │  hips  │  └────────────┘  └──────────┘  └────────┘ └─────────────┘
+       │       └────────┘
+       │
+       ├──────────────┬──────────────┬──────────────┐
+       │              │              │              │
+       ▼              ▼              ▼              ▼
+  ┌────────┐   ┌───────────┐  ┌───────────┐  ┌──────────┐
+  │ events │   │announcem. │  │ documents │  │   faqs   │
+  └───┬────┘   └───────────┘  └───────────┘  └──────────┘
+      │
+      ▼
+ ┌────────────────┐
+ │event_registrat.│
+ └────────────────┘
+
+
+====================================================================
+RÉSUMÉ DES CARDINALITÉS
+====================================================================
+
+  User  1 ──── N  Membership        (un user a plusieurs adhésions)
+  Club  1 ──── N  Membership        (un club a plusieurs membres)
+  User  1 ──── N  Club              (un admin gère N clubs)
+  Club  1 ──── N  Event             (un club organise N événements)
+  Event 1 ──── N  EventRegistration (un événement a N inscrits)
+  User  1 ──── N  EventRegistration (un user s'inscrit à N événements)
+  User  1 ──── N  Notification      (un user reçoit N notifications)
+  User  1 ──── N  ClubRequest       (un user fait N demandes)
+  User  1 ──── N  ChatLog           (un user a N conversations)
+  User  1 ──── N  UserSession       (un user a N sessions)
+  Club  1 ──── N  Announcement      (un club a N annonces)
+  Club  1 ──── N  Document          (un club a N documents)
+  User  1 ──── N  Announcement      (un user crée N annonces)
+
+====================================================================
+NOTE : Toutes les relations sont "logiques" (pas de @ManyToOne JPA).
+Les FK sont stockées comme des String (UUID) sans contrainte JPA
+relationnelle. C'est une architecture dénormalisée volontaire.
+====================================================================

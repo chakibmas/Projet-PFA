@@ -8,6 +8,8 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  ToggleButton,
+  ToggleButtonGroup,
   Toolbar,
   Typography,
 } from '@mui/material';
@@ -27,6 +29,7 @@ import NotificationsIcon from '@mui/icons-material/Notifications';
 import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 import LoginIcon from '@mui/icons-material/Login';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import PostAddIcon from '@mui/icons-material/PostAdd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { UserRole } from '@/shared/types/auth.types';
@@ -86,8 +89,9 @@ function memberNav(): NavSection[] {
     {
       title: 'Clubs & Adhésions',
       items: [
-        { label: 'Parcourir les clubs', path: '/clubs',         icon: <GroupsIcon /> },
-        { label: 'Mes adhésions',       path: '/memberships',   icon: <HowToRegIcon /> },
+        { label: 'Parcourir les clubs', path: '/clubs',              icon: <GroupsIcon /> },
+        { label: 'Mes adhésions',       path: '/memberships',        icon: <HowToRegIcon /> },
+        { label: 'Proposer un club',    path: '/club-requests/new',  icon: <PostAddIcon /> },
       ],
     },
     {
@@ -149,9 +153,10 @@ function platformAdminNav(): NavSection[] {
       title: 'Administration',
       items: [
         { label: 'Tableau de bord',  path: '/admin/dashboard',       icon: <DashboardIcon /> },
-        { label: 'Valider les clubs', path: '/admin/validate-clubs', icon: <VerifiedIcon /> },
-        { label: 'Utilisateurs',     path: '/admin/users',           icon: <PeopleIcon /> },
-        { label: 'Modérer chatbot',  path: '/admin/chatbot',         icon: <SmartToyIcon /> },
+        { label: 'Valider les clubs',   path: '/admin/validate-clubs',   icon: <VerifiedIcon /> },
+        { label: 'Demandes de clubs',  path: '/admin/club-requests',    icon: <PostAddIcon /> },
+        { label: 'Utilisateurs',       path: '/admin/users',            icon: <PeopleIcon /> },
+        { label: 'Modérer chatbot',    path: '/admin/chatbot',          icon: <SmartToyIcon /> },
       ],
     },
     {
@@ -187,10 +192,16 @@ export function SideDrawer({ open, onClose, variant }: Props) {
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
-  const role: UserRole = isAuthenticated && user ? user.role : 'VISITOR';
-  const meta = ROLE_META[role];
+  const activeRole = useAuthStore((s) => s.activeRole);
+  const switchRole = useAuthStore((s) => s.switchRole);
+  const getEffectiveRoles = useAuthStore((s) => s.getEffectiveRoles);
 
-  // Pick sections for this role
+  const role: UserRole = isAuthenticated && user ? (activeRole ?? user.role) : 'VISITOR';
+  const meta = ROLE_META[role];
+  const effectiveRoles = getEffectiveRoles();
+  const isMultiRole = effectiveRoles.length > 1;
+
+  // Pick sections for the active role
   let sections: NavSection[];
   switch (role) {
     case 'PLATFORM_ADMIN':
@@ -225,7 +236,7 @@ export function SideDrawer({ open, onClose, variant }: Props) {
     >
       <Toolbar />
 
-      {/* Role badge */}
+      {/* Role badge + role switcher */}
       <Box sx={{ px: 2, py: 1.5 }}>
         <Chip
           label={meta.label}
@@ -236,6 +247,43 @@ export function SideDrawer({ open, onClose, variant }: Props) {
           <Typography variant="caption" color="text.secondary" display="block" mt={0.5} textAlign="center">
             {user.firstName} {user.lastName}
           </Typography>
+        )}
+        {/* Multi-role switcher */}
+        {isMultiRole && (
+          <Box sx={{ mt: 1.5 }}>
+            <Typography variant="caption" color="text.secondary" fontWeight={700}
+              sx={{ display: 'block', textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.6rem', mb: 0.5, textAlign: 'center' }}>
+              Changer de vue
+            </Typography>
+            <ToggleButtonGroup
+              value={role}
+              exclusive
+              onChange={(_, newRole) => {
+                if (newRole) {
+                  switchRole(newRole);
+                  const dashboards: Record<string, string> = {
+                    PLATFORM_ADMIN: '/admin/dashboard',
+                    CLUB_ADMIN: '/club-admin/dashboard',
+                    MEMBER: '/member/dashboard',
+                  };
+                  navigate(dashboards[newRole] ?? '/clubs');
+                }
+              }}
+              size="small"
+              fullWidth
+              sx={{ flexDirection: 'column', gap: 0.5 }}
+            >
+              {effectiveRoles.map((r) => (
+                <ToggleButton key={r} value={r}
+                  sx={{
+                    fontSize: '0.7rem', py: 0.5, textTransform: 'none',
+                    '&.Mui-selected': { bgcolor: `${ROLE_META[r].color}20`, color: ROLE_META[r].color, fontWeight: 700 },
+                  }}>
+                  {ROLE_META[r].label}
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+          </Box>
         )}
       </Box>
 

@@ -1,0 +1,210 @@
+====================================================================
+   SPÉCIFICATION BACKEND — CHATBOT IA UNICLUBS
+====================================================================
+
+CONTEXTE
+--------
+Le frontend est prêt et appelle déjà ces 4 endpoints. Tu dois les
+implémenter côté Spring Boot avec une intelligence IA (approche RAG
+recommandée).
+
+
+====================================================================
+ENDPOINTS À IMPLÉMENTER
+====================================================================
+
+--------------------------------------------------------------------
+1. POST /api/chatbot/ask — Répondre à une question utilisateur
+--------------------------------------------------------------------
+
+Request body :
+{
+  "message": "Comment rejoindre un club ?",
+  "context": "(optionnel) historique des derniers messages"
+}
+
+Response body attendue :
+{
+  "answer": "Pour rejoindre un club, rendez-vous sur la page Clubs...",
+  "suggestedActions": [
+    { "label": "Voir les clubs", "value": "liste des clubs" },
+    { "label": "Comment postuler ?", "value": "comment postuler dans un club" }
+  ],
+  "escalate": false
+}
+
+Logique attendue :
+  1. Recevoir le message de l'utilisateur
+  2. Chercher les documents pertinents (FAQs, infos clubs, événements)
+     par similarité sémantique (vector search avec pgvector ou un
+     vector store)
+  3. Construire un prompt LLM avec :
+     - Un system prompt :
+       "Tu es l'assistant FAQ de la plateforme UniClubs. Réponds
+       uniquement à partir du contexte fourni. Si tu ne sais pas,
+       propose d'escalader vers un humain. Réponds en français."
+     - Le contexte récupéré (FAQs pertinentes, données clubs/événements)
+     - Le message de l'utilisateur
+  4. Appeler l'API LLM (OpenAI gpt-4o-mini ou Mistral)
+  5. Extraire la réponse et générer 2-3 suggestedActions pertinentes
+  6. Mettre escalate: true si l'utilisateur demande un humain ou si
+     le bot ne peut pas répondre
+  7. Logger la conversation dans la table chat_logs
+
+
+--------------------------------------------------------------------
+2. GET /api/chatbot/faqs — Liste des FAQs
+--------------------------------------------------------------------
+
+Response : FAQ[]
+[
+  {
+    "id": "f1",
+    "question": "Comment rejoindre un club ?",
+    "answer": "Allez dans la page Clubs et cliquez sur Rejoindre...",
+    "category": "Adhésions",
+    "createdAt": "2025-04-01T10:00:00Z"
+  }
+]
+
+
+--------------------------------------------------------------------
+3. POST /api/chatbot/faqs — Créer une FAQ (admin)
+--------------------------------------------------------------------
+
+Request :
+{
+  "question": "...",
+  "answer": "...",
+  "category": "..."     // optionnel
+}
+
+Response : l'objet FAQ créé (status 201)
+
+Important : Quand une FAQ est créée/modifiée, ré-indexer son embedding
+dans le vector store pour que le RAG la retrouve.
+
+
+--------------------------------------------------------------------
+4. GET /api/chatbot/logs — Historique des conversations (admin)
+--------------------------------------------------------------------
+
+Response : ChatLog[]
+[
+  {
+    "id": "log1",
+    "userId": "u1",
+    "sessionId": "sess-abc",
+    "userMessage": "Comment rejoindre un club ?",
+    "botAnswer": "Pour rejoindre un club...",
+    "escalated": false,
+    "feedback": "POSITIVE",
+    "createdAt": "2025-04-07T10:00:00Z"
+  }
+]
+
+
+====================================================================
+ENTITÉS JPA SUGGÉRÉES
+====================================================================
+
+@Entity
+@Table(name = "faqs")
+public class FAQ {
+    @Id @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+
+    @Column(nullable = false, length = 1000)
+    private String question;
+
+    @Column(nullable = false, length = 5000)
+    private String answer;
+
+    private String category;
+
+    // Embedding vector pour la recherche sémantique (pgvector)
+    // @Column(columnDefinition = "vector(1536)")
+    // private float[] embedding;
+
+    private Instant createdAt;
+}
+
+@Entity
+@Table(name = "chat_logs")
+public class ChatLog {
+    @Id @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+    private String userId;
+    private String sessionId;
+
+    @Column(length = 2000)
+    private String userMessage;
+
+    @Column(length = 5000)
+    private String botAnswer;
+
+    private boolean escalated;
+
+    @Enumerated(EnumType.STRING)
+    private Feedback feedback;   // POSITIVE, NEGATIVE
+
+    private Instant createdAt;
+}
+
+
+====================================================================
+ARCHITECTURE RECOMMANDÉE
+====================================================================
+
+POST /api/chatbot/ask
+    |
+    +-- 1. Embed le message utilisateur (OpenAI Embeddings API)
+    +-- 2. Vector search dans les FAQs (pgvector / cosine similarity)
+    +-- 3. Construire le prompt avec le contexte trouvé
+    +-- 4. Appeler le LLM (OpenAI / Mistral)
+    +-- 5. Parser la réponse + suggestedActions
+    +-- 6. Sauvegarder dans chat_logs
+    +-- 7. Retourner ChatAskResponse
+
+
+====================================================================
+DÉPENDANCES MAVEN À AJOUTER
+====================================================================
+
+<!-- Spring AI (simplifie l'intégration LLM) -->
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
+</dependency>
+
+<!-- OU appel HTTP direct avec WebClient vers l'API OpenAI -->
+
+
+====================================================================
+VARIABLES D'ENVIRONNEMENT
+====================================================================
+
+OPENAI_API_KEY=sk-...
+spring.ai.openai.chat.options.model=gpt-4o-mini
+spring.ai.openai.chat.options.temperature=0.3
+
+
+====================================================================
+RÈGLES IMPORTANTES
+====================================================================
+
+- escalate: true quand l'utilisateur dit "humain", "contact",
+  "support", ou quand le LLM n'a pas assez de contexte
+
+- suggestedActions : toujours retourner 2-3 suggestions pour guider
+  l'utilisateur
+
+- Température basse (0.2-0.3) pour des réponses factuelles, pas
+  créatives
+
+- Timeout : max 10 secondes pour la réponse LLM (le front a un
+  timeout de 10s)
+
+- Toutes les réponses en français
+
+====================================================================

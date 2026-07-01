@@ -6,8 +6,10 @@ export interface User {
   lastName: string;
   email: string;
   role: UserRole;
+  roles?: UserRole[];          // multi-role: ex. ['MEMBER', 'CLUB_ADMIN']
   avatarUrl?: string;
-  clubId?: string;       // for CLUB_ADMIN: the club they manage
+  clubId?: string;             // for CLUB_ADMIN: the club they manage
+  managedClubIds?: string[];   // all clubs this user manages
   createdAt: string;
 }
 

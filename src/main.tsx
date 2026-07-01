@@ -4,7 +4,8 @@ import App from './app/App';
 import { DEV_PERSONAS } from './mocks/devSwitch';
 
 async function bootstrap() {
-  if (import.meta.env.DEV) {
+  // MSW mocks — no backend needed (demo mode)
+  if (import.meta.env.VITE_USE_MOCKS === 'true') {
     const { worker } = await import('./mocks/browser');
     await worker.start({ onUnhandledRequest: 'bypass' });
 
